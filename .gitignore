@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.npm-cache/
+.npm-runtime/
+.npm-cli/
+.yarn-cli/
+.npm-package.tgz
+.vite-*.log
+*.tsbuildinfo
+functions/lib/
+.env.local

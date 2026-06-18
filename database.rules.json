@@ -1,0 +1,23 @@
+{
+  "rules": {
+    "rooms": {
+      "$roomId": {
+        ".read": "auth != null && (data.child('players/1/uid').val() === auth.uid || data.child('players/2/uid').val() === auth.uid || !data.child('players/2').exists())",
+        ".write": false,
+        "players": {
+          "$player": {
+            "connected": {
+              ".write": "auth != null && data.parent().child('uid').val() === auth.uid",
+              ".validate": "newData.isBoolean()"
+            },
+            "lastSeen": {
+              ".write": "auth != null && data.parent().child('uid').val() === auth.uid",
+              ".validate": "newData.isNumber() || newData.val() === now"
+            },
+            "$other": { ".write": false }
+          }
+        }
+      }
+    }
+  }
+}
