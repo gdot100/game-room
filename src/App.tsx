@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Board from "./components/Board";
 import RuleEditor from "./components/RuleEditor";
+import SnapLensConnect4 from "./SnapLensConnect4";
 import { AI_ENABLED, cancelAI, requestAIMove } from "./aiClient";
 import { adapters, gameOrder } from "./games";
 import { onlineRoomToSession, playerForUid, DISCONNECT_GRACE_MS } from "./onlineShared";
@@ -28,6 +29,11 @@ const modePlayers = (mode: "hvh" | "hva" | "ava"): Record<Player, PlayerConfig> 
 });
 
 function App() {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("lens") === "connect4" ? <SnapLensConnect4 /> : <ParlourApp />;
+}
+
+function ParlourApp() {
   const [sessions, setSessions] = useState<GameSession[]>([]);
   const [session, setSession] = useState<GameSession | null>(null);
   const [setupGame, setSetupGame] = useState<GameId | null>(null);
@@ -44,7 +50,7 @@ function App() {
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const sharedState = params.get("state");
+    const sharedState = params.get("s") || params.get("state");
     if (sharedState) {
       try {
         setSession(decodeSessionState(sharedState));
@@ -61,7 +67,7 @@ function App() {
   }, []);
   useEffect(() => {
     const roomId = new URLSearchParams(window.location.search).get("room");
-    if (LINK_ONLY || !roomId || !FIREBASE_CONFIGURED || new URLSearchParams(window.location.search).has("state")) return;
+    if (LINK_ONLY || !roomId || !FIREBASE_CONFIGURED || new URLSearchParams(window.location.search).has("state") || new URLSearchParams(window.location.search).has("s")) return;
     setOnlineLoading(true);
     const name = localStorage.getItem("parlour-online-name") || window.prompt("Name for this online room?", "Player") || "Player";
     localStorage.setItem("parlour-online-name", name);
@@ -221,7 +227,7 @@ function App() {
       </section>
       <footer><span>THE PARLOUR</span><span>Saved in this browser · No account needed</span></footer>
     </main>
-    {onlineLoading && <div className="toast">Joining online room...</div>}
+    {onlineLoading && <div className="toast">Working on online room...</div>}
     {setupGame && <Setup gameId={setupGame} onClose={() => setSetupGame(null)} onStart={newSession => {
       setSetupGame(null); setSession(newSession);
     }} onStartOnline={async (gameId, rules, name) => {
@@ -235,10 +241,14 @@ function App() {
         setOnlineRoom(room);
         const url = `${window.location.origin}${window.location.pathname}?room=${room.id}`;
         window.history.replaceState(null, "", url);
-        await navigator.clipboard?.writeText(url).catch(() => undefined);
-        setToast("Room link copied. Send it to your opponent.");
+        void shareUrl(url, setToast, {
+          title: "Join my game room",
+          text: "Open this private room link to join my game."
+        });
       } catch (error) {
-        setToast(error instanceof Error ? error.message : "Could not create online room.");
+        const message = error instanceof Error ? error.message : "Could not create online room.";
+        setToast(message);
+        throw new Error(message);
       } finally {
         setOnlineLoading(false);
       }
@@ -320,6 +330,8 @@ function Setup({ gameId, onClose, onStart, onStartOnline }: {
   const [mode, setMode] = useState<"hvh" | "hva" | "ava">(AI_ENABLED ? "hva" : "hvh");
   const [onlineName, setOnlineName] = useState(localStorage.getItem("parlour-online-name") || "Player");
   const [players, setPlayers] = useState(modePlayers(AI_ENABLED ? "hva" : "hvh"));
+  const [onlineBusy, setOnlineBusy] = useState(false);
+  const [onlineError, setOnlineError] = useState("");
   const errors = adapter.validateRules(rules);
   const changeMode = (next: typeof mode) => { setMode(next); setPlayers(modePlayers(next)); };
   const updatePlayer = (player: Player, patch: Partial<PlayerConfig>) =>
@@ -354,10 +366,19 @@ function Setup({ gameId, onClose, onStart, onStartOnline }: {
         {!LINK_ONLY && <div className="setup-section online-start">
           <div className="setup-heading"><h3>Online room</h3><span>{FIREBASE_CONFIGURED ? "Private link" : "Needs Firebase config"}</span></div>
           <label><span>Your name</span><input value={onlineName} onChange={event => setOnlineName(event.target.value)} /></label>
-          <button className="secondary-button" disabled={!FIREBASE_CONFIGURED || errors.length > 0} onClick={() => {
+          {onlineError && <p className="error">{onlineError}</p>}
+          <button className="secondary-button" disabled={!FIREBASE_CONFIGURED || errors.length > 0 || onlineBusy} onClick={async () => {
+            setOnlineBusy(true);
+            setOnlineError("");
             localStorage.setItem("parlour-online-name", onlineName || "Player");
-            onStartOnline(gameId, rules, onlineName || "Player");
-          }}>Create private room link</button>
+            try {
+              await onStartOnline(gameId, rules, onlineName || "Player");
+            } catch (error) {
+              setOnlineError(error instanceof Error ? error.message : "Could not create online room.");
+            } finally {
+              setOnlineBusy(false);
+            }
+          }}>{onlineBusy ? "Creating room..." : "Create private room link"}</button>
         </div>}
         <div className="setup-section">
           <div className="setup-heading"><h3>House rules</h3><button onClick={() => setRules(structuredClone(adapter.defaultRules))}>Reset standard</button></div>
@@ -368,7 +389,10 @@ function Setup({ gameId, onClose, onStart, onStartOnline }: {
         {LINK_ONLY && <button className="primary-button" disabled={errors.length > 0} onClick={() => {
           const shared = createSession(gameId, rules, modePlayers("hvh"));
           const url = makeSessionShareUrl({ ...shared, origin: "link" });
-          navigator.clipboard?.writeText(url).then(() => alert("Game-state link copied. Send it to the other player.")).catch(() => window.prompt("Copy this game-state link:", url));
+          void shareUrl(url, message => alert(message), {
+            title: "Game state",
+            text: "Open this link to play the next move."
+          });
         }}>Create game-state link <span>→</span></button>}
       </div>
     </div>
@@ -444,7 +468,10 @@ function OnlineControls({ room, session, uid, setToast }: {
   return <div className="online-controls">
     <p className="panel-label">Online room</p>
     <div className="button-row">
-      <button onClick={() => navigator.clipboard?.writeText(window.location.href).then(() => setToast("Room link copied."))}>Copy link</button>
+      <button onClick={() => void shareUrl(window.location.href, setToast, {
+        title: "Join my game room",
+        text: "Open this private room link to join my game."
+      })}>Share link</button>
       <button onClick={() => room && onlineClient().then(client => client.resignOnlineRoom(room.id)).catch(error => setToast(error instanceof Error ? error.message : "Could not resign."))}>Resign</button>
     </div>
     {parentId && <button className="wide-button" onClick={() => room && onlineClient().then(client => client.requestOnlineUndo(room.id, parentId, session.revision ?? 0)).catch(error => setToast(error instanceof Error ? error.message : "Could not request undo."))}>Request undo</button>}
@@ -531,11 +558,34 @@ function tone() {
 
 function promptForShareLink(session: GameSession, setToast: (message: string) => void) {
   const url = makeSessionShareUrl({ ...session, origin: "link" });
-  const shouldShare = window.confirm("Move played. Copy the next game-state link for the other player?");
+  const shouldShare = window.confirm("Move played. Share the next game-state link with the other player?");
   if (!shouldShare) return;
-  navigator.clipboard?.writeText(url)
-    .then(() => setToast("Game-state link copied. Send it to the other player."))
-    .catch(() => window.prompt("Copy this game-state link:", url));
+  void shareUrl(url, setToast, {
+    title: "Next game move",
+    text: "Open this link to play the next move."
+  });
+}
+
+async function shareUrl(
+  url: string,
+  setToast: (message: string) => void,
+  options: { title: string; text: string }
+) {
+  if (navigator.share) {
+    try {
+      await navigator.share({ ...options, url });
+      setToast("Share sheet opened.");
+      return;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+    }
+  }
+  try {
+    await navigator.clipboard?.writeText(url);
+    setToast("Link copied. Send it to the other player.");
+  } catch {
+    window.prompt("Copy this link:", url);
+  }
 }
 
 export default App;

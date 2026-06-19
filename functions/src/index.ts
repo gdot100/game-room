@@ -4,6 +4,11 @@ import { HttpsError, onCall } from "firebase-functions/v2/https";
 import { applyOnlineMove, createInitialRoom, currentRoomState, DISCONNECT_GRACE_MS, finishRoomUpdate, playerForUid, publicRoomId, roomPath } from "../../src/onlineShared";
 import type { GameId, OnlineRoom, OnlineSeat, Player } from "../../src/types";
 
+const callableOptions = {
+  cors: true,
+  invoker: "public" as const
+};
+
 function firebaseConfigProjectId() {
   try {
     const config = JSON.parse(process.env.FIREBASE_CONFIG || "{}") as { projectId?: string; databaseURL?: string };
@@ -56,7 +61,7 @@ async function transactRoom(roomId: string, update: (room: OnlineRoom) => Online
   return committedRoom;
 }
 
-export const createRoom = onCall(async request => {
+export const createRoom = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const gameId = request.data.gameId as GameId;
   const now = Date.now();
@@ -70,7 +75,7 @@ export const createRoom = onCall(async request => {
   throw new HttpsError("resource-exhausted", "Could not allocate a room code.");
 });
 
-export const joinRoom = onCall(async request => {
+export const joinRoom = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   const now = Date.now();
@@ -92,7 +97,7 @@ export const joinRoom = onCall(async request => {
   return { roomId, room };
 });
 
-export const submitMove = onCall(async request => {
+export const submitMove = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   try {
@@ -105,7 +110,7 @@ export const submitMove = onCall(async request => {
   }
 });
 
-export const resignRoom = onCall(async request => {
+export const resignRoom = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   const now = Date.now();
@@ -118,7 +123,7 @@ export const resignRoom = onCall(async request => {
   return { roomId, room };
 });
 
-export const requestUndo = onCall(async request => {
+export const requestUndo = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   const now = Date.now();
@@ -133,7 +138,7 @@ export const requestUndo = onCall(async request => {
   return { roomId, room };
 });
 
-export const respondUndo = onCall(async request => {
+export const respondUndo = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   const now = Date.now();
@@ -148,7 +153,7 @@ export const respondUndo = onCall(async request => {
   return { roomId, room };
 });
 
-export const claimDisconnectWin = onCall(async request => {
+export const claimDisconnectWin = onCall(callableOptions, async request => {
   const uid = requireUid(request);
   const roomId = String(request.data.roomId || "");
   const now = Date.now();
